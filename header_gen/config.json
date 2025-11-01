@@ -1,0 +1,15 @@
+{
+    "struct_name": "pcie_bar2",
+    "var_name": "pcie",
+    "ofst_mask": [
+        ["pcie_bar2", "irq", "rd_comp", 0, 1],
+        ["pcie_bar2", "irq", "wr_comp", 1, 1],
+        ["pcie_bar2", "rd_csr", "start", 0, 1],
+        ["pcie_bar2", "rd_err", "addr_error", 0, 1],
+        ["pcie_bar2", "rd_err", "size_error", 1, 1],
+        ["pcie_bar2", "wr_csr", "start", 0, 1],
+        ["pcie_bar2", "wr_err", "addr_error", 0, 1],
+        ["pcie_bar2", "wr_err", "size_error", 1, 1]
+    ],
+    "gen_type": "user"
+}
