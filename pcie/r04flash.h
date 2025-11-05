@@ -97,8 +97,8 @@ struct r04flash_data {
 };
 
 enum r04flash_error {
-	R04_ADDRINVAL = 1,
-	R04_SIZEINVAL = 2,
+	R04_ADDRINVAL = 0xc0ffee01,
+	R04_SIZEINVAL = 0xc0ffee02,
 };
 
 #define PCIE_BAR0_RD_CTRL_START_OFST (0)

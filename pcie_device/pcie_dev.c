@@ -94,6 +94,7 @@ static void *rd_thread_func(void *arg) {
             continue;
         }
 
+        unset_pcie_bar0_rd_ctrl_start(dev->csr);
         unset_pcie_bar0_rd_status_comp(dev->csr);
         unset_pcie_bar0_rd_status_addr_error(dev->csr);
         unset_pcie_bar0_rd_status_size_error(dev->csr);
@@ -109,6 +110,7 @@ static void *rd_thread_func(void *arg) {
 
         // проверка дескриптора
         if (!validate_descriptor(dev, addr, size, 0)) {
+            set_pcie_bar0_rd_status_comp(dev->csr);
             INTERRUPT(dev);
             continue;
         }
@@ -123,7 +125,6 @@ static void *rd_thread_func(void *arg) {
         address_lock_rd_unlock(&dev->storage_lock);
 
         // информаруем о завершении чтения
-        unset_pcie_bar0_rd_ctrl_start(dev->csr);
         set_pcie_bar0_rd_status_comp(dev->csr);
         INTERRUPT(dev);
     }
@@ -141,6 +142,7 @@ static void *wr_thread_func(void *arg) {
             continue;
         }
         // сброс прерываний и csr
+        unset_pcie_bar0_wr_ctrl_start(dev->csr);
         unset_pcie_bar0_wr_status_comp(dev->csr);
         unset_pcie_bar0_wr_status_addr_error(dev->csr);
         unset_pcie_bar0_wr_status_size_error(dev->csr);
@@ -156,6 +158,7 @@ static void *wr_thread_func(void *arg) {
 
         // проверка дескриптора
         if (!validate_descriptor(dev, addr, size, 1)) {
+            set_pcie_bar0_wr_status_comp(dev->csr);
             INTERRUPT(dev);
             continue;
         }
@@ -170,11 +173,10 @@ static void *wr_thread_func(void *arg) {
         mf_sync(&dev->storage_f, addr, size, MS_SYNC);
 
         // разблокировка записи
+        set_pcie_bar0_wr_status_comp(dev->csr);
         address_lock_wr_unlock(&dev->storage_lock);
 
         // информаруем о завершении записи
-        unset_pcie_bar0_wr_ctrl_start(dev->csr);
-        set_pcie_bar0_wr_status_comp(dev->csr);
         INTERRUPT(dev);
     }
 end:

@@ -1,3 +1,4 @@
+#include "linux/cleanup.h"
 #include "linux/gfp_types.h"
 #include "linux/kern_levels.h"
 #include "linux/mutex.h"
@@ -334,6 +335,15 @@ static ssize_t r04flash_read(struct file *file, char __user *buf, size_t count,
 			goto err;
 		}
 
+		if (get_pcie_bar0_rd_status_addr_error(dev->csr)) {
+			ret = R04_ADDRINVAL;
+			goto err;
+		}
+		if (get_pcie_bar0_rd_status_size_error(dev->csr)) {
+			ret = R04_SIZEINVAL;
+			goto err;
+		}
+
 		ret += size;
 		count -= size;
 		addr += size;
@@ -391,6 +401,15 @@ static ssize_t r04flash_write(struct file *file, const char __user *buf,
 			goto err;
 		} else if (timeout < 0) {
 			ret = -EFAULT;
+			goto err;
+		}
+
+		if (get_pcie_bar0_wr_status_addr_error(dev->csr)) {
+			ret = R04_ADDRINVAL;
+			goto err;
+		}
+		if (get_pcie_bar0_wr_status_size_error(dev->csr)) {
+			ret = R04_SIZEINVAL;
 			goto err;
 		}
 

@@ -17,6 +17,7 @@ QEMU_BASE_FLAGS = \
 		-hda disk.qcow2 \
 		-device e1000,netdev=net0 -netdev user,id=net0,hostfwd=tcp::2222-:22 \
 		-monitor telnet:localhost:1234,server,nowait \
+		-enable-kvm \
 		-vga std
 
 QEMU_BAR0_FLAGS=bar0-size=4K,bar0-obj=membar0
