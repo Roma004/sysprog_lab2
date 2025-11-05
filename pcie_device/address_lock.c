@@ -1,5 +1,5 @@
 #include "address_lock.h"
-#include "bar2.h"
+#include "bars.h"
 
 #include <stddef.h>
 #include <string.h>

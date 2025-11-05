@@ -2,7 +2,7 @@
 #include <stdint.h>
 
 #define KiB           1024
-#define WIN_SIZE      4 * KiB
+#define WIN_SIZE      32 * KiB
 #define FIELD_SIZE    64
 #define POOLING_DELAY 200
 
@@ -17,33 +17,30 @@ struct pcie_desc {
     uint32_t size;
 };
 
-struct pcie_bar2 {
+struct pcie_bar0 {
     // размер диска
     __field uint32_t disk_size;
-
-    // регистр с прерываниями
-    // - rd_comp
-    // - wr_comp
-    __field uint32_t irq;
 
     __field struct {
         // регистр статуса чтения
         // - start
-        uint8_t rd_csr;
+        uint8_t rd_ctrl;
 
         // регистр ошибки чтения
+        // - comp
         // - addr_error
         // - size_error
-        uint8_t rd_err;
+        uint8_t rd_status;
 
         // регистр статуса записи
         // - start
-        uint8_t wr_csr;
+        uint8_t wr_ctrl;
 
         // регистр ошибки записи
+        // - comp
         // - addr_error
         // - size_error
-        uint8_t wr_err;
+        uint8_t wr_status;
     };
 
     // дескриптор чтения
@@ -51,7 +48,9 @@ struct pcie_bar2 {
 
     // дескриптор записи
     __field struct pcie_desc wr_desc;
+};
 
+struct pcie_bar2 {
     __window(rd_data);
     __window(wr_data);
 };
@@ -115,148 +114,157 @@ struct pcie_bar2 {
  * 5. Извлечение данных из пространства записи
  *
  * */
+#define PCIE_BAR0_RD_CTRL_START_OFST (0)
+#define PCIE_BAR0_RD_CTRL_START_MASK (1 << PCIE_BAR0_RD_CTRL_START_OFST)
 
-#define PCIE_BAR2_IRQ_RD_COMP_OFST (0)
-#define PCIE_BAR2_IRQ_RD_COMP_MASK (1 << PCIE_BAR2_IRQ_RD_COMP_OFST)
+#define PCIE_BAR0_WR_CTRL_START_OFST (0)
+#define PCIE_BAR0_WR_CTRL_START_MASK (1 << PCIE_BAR0_WR_CTRL_START_OFST)
 
-#define PCIE_BAR2_IRQ_WR_COMP_OFST (1)
-#define PCIE_BAR2_IRQ_WR_COMP_MASK (1 << PCIE_BAR2_IRQ_WR_COMP_OFST)
+#define PCIE_BAR0_RD_STATUS_COMP_OFST (0)
+#define PCIE_BAR0_RD_STATUS_COMP_MASK (1 << PCIE_BAR0_RD_STATUS_COMP_OFST)
 
-#define PCIE_BAR2_RD_CSR_START_OFST (0)
-#define PCIE_BAR2_RD_CSR_START_MASK (1 << PCIE_BAR2_RD_CSR_START_OFST)
+#define PCIE_BAR0_RD_STATUS_ADDR_ERROR_OFST (6)
+#define PCIE_BAR0_RD_STATUS_ADDR_ERROR_MASK \
+    (1 << PCIE_BAR0_RD_STATUS_ADDR_ERROR_OFST)
 
-#define PCIE_BAR2_RD_ERR_ADDR_ERROR_OFST (0)
-#define PCIE_BAR2_RD_ERR_ADDR_ERROR_MASK (1 << PCIE_BAR2_RD_ERR_ADDR_ERROR_OFST)
+#define PCIE_BAR0_RD_STATUS_SIZE_ERROR_OFST (7)
+#define PCIE_BAR0_RD_STATUS_SIZE_ERROR_MASK \
+    (1 << PCIE_BAR0_RD_STATUS_SIZE_ERROR_OFST)
 
-#define PCIE_BAR2_RD_ERR_SIZE_ERROR_OFST (1)
-#define PCIE_BAR2_RD_ERR_SIZE_ERROR_MASK (1 << PCIE_BAR2_RD_ERR_SIZE_ERROR_OFST)
+#define PCIE_BAR0_WR_STATUS_COMP_OFST (0)
+#define PCIE_BAR0_WR_STATUS_COMP_MASK (1 << PCIE_BAR0_WR_STATUS_COMP_OFST)
 
-#define PCIE_BAR2_WR_CSR_START_OFST (0)
-#define PCIE_BAR2_WR_CSR_START_MASK (1 << PCIE_BAR2_WR_CSR_START_OFST)
+#define PCIE_BAR0_WR_STATUS_ADDR_ERROR_OFST (6)
+#define PCIE_BAR0_WR_STATUS_ADDR_ERROR_MASK \
+    (1 << PCIE_BAR0_WR_STATUS_ADDR_ERROR_OFST)
 
-#define PCIE_BAR2_WR_ERR_ADDR_ERROR_OFST (0)
-#define PCIE_BAR2_WR_ERR_ADDR_ERROR_MASK (1 << PCIE_BAR2_WR_ERR_ADDR_ERROR_OFST)
+#define PCIE_BAR0_WR_STATUS_SIZE_ERROR_OFST (7)
+#define PCIE_BAR0_WR_STATUS_SIZE_ERROR_MASK \
+    (1 << PCIE_BAR0_WR_STATUS_SIZE_ERROR_OFST)
 
-#define PCIE_BAR2_WR_ERR_SIZE_ERROR_OFST (1)
-#define PCIE_BAR2_WR_ERR_SIZE_ERROR_MASK (1 << PCIE_BAR2_WR_ERR_SIZE_ERROR_OFST)
-
-static inline int get_pcie_bar2_irq_rd_comp(volatile struct pcie_bar2 *pcie) {
-    return (pcie->irq & PCIE_BAR2_IRQ_RD_COMP_MASK)
-        >> PCIE_BAR2_IRQ_RD_COMP_OFST;
-}
-
-static inline void set_pcie_bar2_irq_rd_comp(volatile struct pcie_bar2 *pcie) {
-    pcie->irq |= PCIE_BAR2_IRQ_RD_COMP_MASK;
-}
-
-static inline void
-unset_pcie_bar2_irq_rd_comp(volatile struct pcie_bar2 *pcie) {
-    pcie->irq &= ~PCIE_BAR2_IRQ_RD_COMP_MASK;
-}
-
-static inline int get_pcie_bar2_irq_wr_comp(volatile struct pcie_bar2 *pcie) {
-    return (pcie->irq & PCIE_BAR2_IRQ_WR_COMP_MASK)
-        >> PCIE_BAR2_IRQ_WR_COMP_OFST;
-}
-
-static inline void set_pcie_bar2_irq_wr_comp(volatile struct pcie_bar2 *pcie) {
-    pcie->irq |= PCIE_BAR2_IRQ_WR_COMP_MASK;
+static inline int get_pcie_bar0_rd_ctrl_start(volatile struct pcie_bar0 *pcie) {
+    return (pcie->rd_ctrl & PCIE_BAR0_RD_CTRL_START_MASK)
+        >> PCIE_BAR0_RD_CTRL_START_OFST;
 }
 
 static inline void
-unset_pcie_bar2_irq_wr_comp(volatile struct pcie_bar2 *pcie) {
-    pcie->irq &= ~PCIE_BAR2_IRQ_WR_COMP_MASK;
-}
-
-static inline int get_pcie_bar2_rd_csr_start(volatile struct pcie_bar2 *pcie) {
-    return (pcie->rd_csr & PCIE_BAR2_RD_CSR_START_MASK)
-        >> PCIE_BAR2_RD_CSR_START_OFST;
-}
-
-static inline void set_pcie_bar2_rd_csr_start(volatile struct pcie_bar2 *pcie) {
-    pcie->rd_csr |= PCIE_BAR2_RD_CSR_START_MASK;
+set_pcie_bar0_rd_ctrl_start(volatile struct pcie_bar0 *pcie) {
+    pcie->rd_ctrl |= PCIE_BAR0_RD_CTRL_START_MASK;
 }
 
 static inline void
-unset_pcie_bar2_rd_csr_start(volatile struct pcie_bar2 *pcie) {
-    pcie->rd_csr &= ~PCIE_BAR2_RD_CSR_START_MASK;
+unset_pcie_bar0_rd_ctrl_start(volatile struct pcie_bar0 *pcie) {
+    pcie->rd_ctrl &= ~PCIE_BAR0_RD_CTRL_START_MASK;
+}
+
+static inline int get_pcie_bar0_wr_ctrl_start(volatile struct pcie_bar0 *pcie) {
+    return (pcie->wr_ctrl & PCIE_BAR0_WR_CTRL_START_MASK)
+        >> PCIE_BAR0_WR_CTRL_START_OFST;
+}
+
+static inline void
+set_pcie_bar0_wr_ctrl_start(volatile struct pcie_bar0 *pcie) {
+    pcie->wr_ctrl |= PCIE_BAR0_WR_CTRL_START_MASK;
+}
+
+static inline void
+unset_pcie_bar0_wr_ctrl_start(volatile struct pcie_bar0 *pcie) {
+    pcie->wr_ctrl &= ~PCIE_BAR0_WR_CTRL_START_MASK;
 }
 
 static inline int
-get_pcie_bar2_rd_err_addr_error(volatile struct pcie_bar2 *pcie) {
-    return (pcie->rd_err & PCIE_BAR2_RD_ERR_ADDR_ERROR_MASK)
-        >> PCIE_BAR2_RD_ERR_ADDR_ERROR_OFST;
+get_pcie_bar0_rd_status_comp(volatile struct pcie_bar0 *pcie) {
+    return (pcie->rd_status & PCIE_BAR0_RD_STATUS_COMP_MASK)
+        >> PCIE_BAR0_RD_STATUS_COMP_OFST;
 }
 
 static inline void
-set_pcie_bar2_rd_err_addr_error(volatile struct pcie_bar2 *pcie) {
-    pcie->rd_err |= PCIE_BAR2_RD_ERR_ADDR_ERROR_MASK;
+set_pcie_bar0_rd_status_comp(volatile struct pcie_bar0 *pcie) {
+    pcie->rd_status |= PCIE_BAR0_RD_STATUS_COMP_MASK;
 }
 
 static inline void
-unset_pcie_bar2_rd_err_addr_error(volatile struct pcie_bar2 *pcie) {
-    pcie->rd_err &= ~PCIE_BAR2_RD_ERR_ADDR_ERROR_MASK;
+unset_pcie_bar0_rd_status_comp(volatile struct pcie_bar0 *pcie) {
+    pcie->rd_status &= ~PCIE_BAR0_RD_STATUS_COMP_MASK;
 }
 
 static inline int
-get_pcie_bar2_rd_err_size_error(volatile struct pcie_bar2 *pcie) {
-    return (pcie->rd_err & PCIE_BAR2_RD_ERR_SIZE_ERROR_MASK)
-        >> PCIE_BAR2_RD_ERR_SIZE_ERROR_OFST;
+get_pcie_bar0_rd_status_addr_error(volatile struct pcie_bar0 *pcie) {
+    return (pcie->rd_status & PCIE_BAR0_RD_STATUS_ADDR_ERROR_MASK)
+        >> PCIE_BAR0_RD_STATUS_ADDR_ERROR_OFST;
 }
 
 static inline void
-set_pcie_bar2_rd_err_size_error(volatile struct pcie_bar2 *pcie) {
-    pcie->rd_err |= PCIE_BAR2_RD_ERR_SIZE_ERROR_MASK;
+set_pcie_bar0_rd_status_addr_error(volatile struct pcie_bar0 *pcie) {
+    pcie->rd_status |= PCIE_BAR0_RD_STATUS_ADDR_ERROR_MASK;
 }
 
 static inline void
-unset_pcie_bar2_rd_err_size_error(volatile struct pcie_bar2 *pcie) {
-    pcie->rd_err &= ~PCIE_BAR2_RD_ERR_SIZE_ERROR_MASK;
-}
-
-static inline int get_pcie_bar2_wr_csr_start(volatile struct pcie_bar2 *pcie) {
-    return (pcie->wr_csr & PCIE_BAR2_WR_CSR_START_MASK)
-        >> PCIE_BAR2_WR_CSR_START_OFST;
-}
-
-static inline void set_pcie_bar2_wr_csr_start(volatile struct pcie_bar2 *pcie) {
-    pcie->wr_csr |= PCIE_BAR2_WR_CSR_START_MASK;
-}
-
-static inline void
-unset_pcie_bar2_wr_csr_start(volatile struct pcie_bar2 *pcie) {
-    pcie->wr_csr &= ~PCIE_BAR2_WR_CSR_START_MASK;
+unset_pcie_bar0_rd_status_addr_error(volatile struct pcie_bar0 *pcie) {
+    pcie->rd_status &= ~PCIE_BAR0_RD_STATUS_ADDR_ERROR_MASK;
 }
 
 static inline int
-get_pcie_bar2_wr_err_addr_error(volatile struct pcie_bar2 *pcie) {
-    return (pcie->wr_err & PCIE_BAR2_WR_ERR_ADDR_ERROR_MASK)
-        >> PCIE_BAR2_WR_ERR_ADDR_ERROR_OFST;
+get_pcie_bar0_rd_status_size_error(volatile struct pcie_bar0 *pcie) {
+    return (pcie->rd_status & PCIE_BAR0_RD_STATUS_SIZE_ERROR_MASK)
+        >> PCIE_BAR0_RD_STATUS_SIZE_ERROR_OFST;
 }
 
 static inline void
-set_pcie_bar2_wr_err_addr_error(volatile struct pcie_bar2 *pcie) {
-    pcie->wr_err |= PCIE_BAR2_WR_ERR_ADDR_ERROR_MASK;
+set_pcie_bar0_rd_status_size_error(volatile struct pcie_bar0 *pcie) {
+    pcie->rd_status |= PCIE_BAR0_RD_STATUS_SIZE_ERROR_MASK;
 }
 
 static inline void
-unset_pcie_bar2_wr_err_addr_error(volatile struct pcie_bar2 *pcie) {
-    pcie->wr_err &= ~PCIE_BAR2_WR_ERR_ADDR_ERROR_MASK;
+unset_pcie_bar0_rd_status_size_error(volatile struct pcie_bar0 *pcie) {
+    pcie->rd_status &= ~PCIE_BAR0_RD_STATUS_SIZE_ERROR_MASK;
 }
 
 static inline int
-get_pcie_bar2_wr_err_size_error(volatile struct pcie_bar2 *pcie) {
-    return (pcie->wr_err & PCIE_BAR2_WR_ERR_SIZE_ERROR_MASK)
-        >> PCIE_BAR2_WR_ERR_SIZE_ERROR_OFST;
+get_pcie_bar0_wr_status_comp(volatile struct pcie_bar0 *pcie) {
+    return (pcie->wr_status & PCIE_BAR0_WR_STATUS_COMP_MASK)
+        >> PCIE_BAR0_WR_STATUS_COMP_OFST;
 }
 
 static inline void
-set_pcie_bar2_wr_err_size_error(volatile struct pcie_bar2 *pcie) {
-    pcie->wr_err |= PCIE_BAR2_WR_ERR_SIZE_ERROR_MASK;
+set_pcie_bar0_wr_status_comp(volatile struct pcie_bar0 *pcie) {
+    pcie->wr_status |= PCIE_BAR0_WR_STATUS_COMP_MASK;
 }
 
 static inline void
-unset_pcie_bar2_wr_err_size_error(volatile struct pcie_bar2 *pcie) {
-    pcie->wr_err &= ~PCIE_BAR2_WR_ERR_SIZE_ERROR_MASK;
+unset_pcie_bar0_wr_status_comp(volatile struct pcie_bar0 *pcie) {
+    pcie->wr_status &= ~PCIE_BAR0_WR_STATUS_COMP_MASK;
+}
+
+static inline int
+get_pcie_bar0_wr_status_addr_error(volatile struct pcie_bar0 *pcie) {
+    return (pcie->wr_status & PCIE_BAR0_WR_STATUS_ADDR_ERROR_MASK)
+        >> PCIE_BAR0_WR_STATUS_ADDR_ERROR_OFST;
+}
+
+static inline void
+set_pcie_bar0_wr_status_addr_error(volatile struct pcie_bar0 *pcie) {
+    pcie->wr_status |= PCIE_BAR0_WR_STATUS_ADDR_ERROR_MASK;
+}
+
+static inline void
+unset_pcie_bar0_wr_status_addr_error(volatile struct pcie_bar0 *pcie) {
+    pcie->wr_status &= ~PCIE_BAR0_WR_STATUS_ADDR_ERROR_MASK;
+}
+
+static inline int
+get_pcie_bar0_wr_status_size_error(volatile struct pcie_bar0 *pcie) {
+    return (pcie->wr_status & PCIE_BAR0_WR_STATUS_SIZE_ERROR_MASK)
+        >> PCIE_BAR0_WR_STATUS_SIZE_ERROR_OFST;
+}
+
+static inline void
+set_pcie_bar0_wr_status_size_error(volatile struct pcie_bar0 *pcie) {
+    pcie->wr_status |= PCIE_BAR0_WR_STATUS_SIZE_ERROR_MASK;
+}
+
+static inline void
+unset_pcie_bar0_wr_status_size_error(volatile struct pcie_bar0 *pcie) {
+    pcie->wr_status &= ~PCIE_BAR0_WR_STATUS_SIZE_ERROR_MASK;
 }
 

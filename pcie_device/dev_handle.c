@@ -20,7 +20,7 @@ static inline void print_usage(const char *argv0) {
 void term(int signum) { done = 1; }
 
 int main(int argc, const char **argv) {
-    if (argc != 3) {
+    if (argc != 4) {
         print_usage(argv[0]);
         return EXIT_SUCCESS;
     }
@@ -39,7 +39,7 @@ int main(int argc, const char **argv) {
     // read and write параллельно
     // https://www.man7.org/linux/man-pages/man7/inotify.7.html
 
-    switch (pcie_dev_init(&dev, argv[1], argv[2])) {
+    switch (pcie_dev_init(&dev, argv[1], argv[2], argv[3])) {
     case PCIE_DEV_FILE_ERROR:
         fprintf(stderr, "file error: `%s`\n", strerror(errno));
         break;
@@ -52,6 +52,9 @@ int main(int argc, const char **argv) {
         break;
     case PCIE_DEV_THREAD_ERROR:
         fprintf(stderr, "thread error!: `%s`\n", strerror(errno));
+        break;
+    case PCIE_DEV_SOCKET_ERROR:
+        fprintf(stderr, "socket error!: `%s`\n", strerror(errno));
         break;
     case PCIE_DEV_OK: goto loop;
     }

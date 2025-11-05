@@ -3,8 +3,9 @@
 #include <stddef.h>
 
 #include "address_lock.h"
-#include "bar2.h"
+#include "bars.h"
 #include "mapped_file.h"
+#include "socket.h"
 
 enum pcie_dev_status {
     PCIE_DEV_OK = 0,
@@ -13,12 +14,17 @@ enum pcie_dev_status {
     PCIE_DEV_MSYNC_ERROR,
     PCIE_DEV_MEM_ERROR,
     PCIE_DEV_THREAD_ERROR,
+    PCIE_DEV_SOCKET_ERROR,
 };
 
 struct pcie_dev {
     struct mapped_file storage_f;
+    struct mapped_file bar0_f;
     struct mapped_file bar2_f;
-    volatile struct pcie_bar2 *bar2;
+    volatile struct pcie_bar0 *csr;
+    volatile struct pcie_bar2 *data;
+
+    struct socket irq_socket;
 
     pthread_t rd_thread;
     pthread_t wr_thread;
@@ -28,6 +34,7 @@ struct pcie_dev {
 
 enum pcie_dev_status pcie_dev_init(
     struct pcie_dev *ctx,
+    const char *bar0_filename,
     const char *bar2_filename,
     const char *storage_filename
 );

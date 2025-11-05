@@ -8,7 +8,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "bar2.h"
+#include "bars.h"
 #include "pcie_dev.h"
 
 static inline void print_usage(const char *argv0) {
