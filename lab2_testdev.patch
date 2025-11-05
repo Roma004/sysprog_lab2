@@ -1,0 +1,296 @@
+diff --git a/hw/misc/Kconfig b/hw/misc/Kconfig
+index 4e35657468..a5ecfbb490 100644
+--- a/hw/misc/Kconfig
++++ b/hw/misc/Kconfig
+@@ -25,6 +25,11 @@ config PCI_TESTDEV
+     default y if TEST_DEVICES
+     depends on PCI
+ 
++config LAB2_TESTDEV
++    bool
++    default y
++    depends on PCI
++
+ config EDU
+     bool
+     default y if TEST_DEVICES
+diff --git a/hw/misc/lab2-testdev.c b/hw/misc/lab2-testdev.c
+new file mode 100644
+index 0000000000..b11e91f1fd
+--- /dev/null
++++ b/hw/misc/lab2-testdev.c
+@@ -0,0 +1,262 @@
++/*
++ * QEMU PCI device for MEPHI Dep.12 System programming course.
++ *
++ * Copyright (c) 2025 Klimov Roman <klimov.roma04@mail.ru>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, see <http://www.gnu.org/licenses/>.
++ */
++
++// clang-format off
++#include "qemu/osdep.h"
++// clang-format on
++
++#include "chardev/char-fe.h"
++#include "chardev/char.h"
++#include "hw/pci/msi.h"
++#include "hw/pci/pci_device.h"
++#include "hw/qdev-properties.h"
++#include "qemu/log-for-trace.h"
++#include "qemu/module.h"
++#include "qemu/typedefs.h"
++#include "qom/object.h"
++
++#include "standard-headers/linux/pci_regs.h"
++#include "system/hostmem.h"
++
++/*
++ * NOTE: количество доступных bar-ов. Измените это значение на 7, чтобы стали
++ * доступны для конфигурации все bar регистры с 0 по 6
++ * */
++#define BARS_NUM 3
++
++struct chardev_back {
++    CharBackend chr;
++    bool chr_connected;
++};
++
++struct membar {
++    HostMemoryBackend *hostmem;
++    MemoryRegion *mem;
++    uint64_t size;
++    char bar_no;
++};
++
++struct Lab2TestDevState {
++    /*< private >*/
++    PCIDevice parent_obj;
++    /*< public >*/
++
++    struct membar bars[BARS_NUM];
++    struct chardev_back chr;
++
++    char *chardev_host;
++    char *chardev_id;
++    uint16_t chardev_port;
++};
++
++#define TYPE_LAB2_TESTDEV "lab2-testdev"
++
++OBJECT_DECLARE_SIMPLE_TYPE(Lab2TestDevState, LAB2_TESTDEV)
++
++static int lab2_testdev_chr_can_read(void *opaque) { return 1024; }
++
++static void lab2_testdev_chr_read(void *opaque, const uint8_t *buf, int size) {
++    Lab2TestDevState *d = opaque;
++
++    if (size < 1) return;
++
++    switch (buf[0]) {
++    case 'I': // Trigger IRQ
++        msi_notify(&d->parent_obj, 0);
++        qemu_chr_fe_write(&d->chr.chr, (const uint8_t *)"MSI\n", 4);
++        break;
++    case 'P': // Trigger PING
++        qemu_chr_fe_write(&d->chr.chr, (const uint8_t *)"PONG\n", 5);
++        break;
++    default: break;
++    }
++}
++
++static void lab2_testdev_chr_event(void *opaque, QEMUChrEvent event) {
++    Lab2TestDevState *d = opaque;
++
++    switch (event) {
++    case CHR_EVENT_OPENED:
++        d->chr.chr_connected = true;
++        qemu_log("lab2_testdev: chr connect!\n");
++        break;
++    case CHR_EVENT_CLOSED:
++        d->chr.chr_connected = false;
++        qemu_log("lab2_testdev: chr disconnect!\n");
++        break;
++    default: break;
++    }
++}
++
++static int lab2_testdev_realize_chardev(Lab2TestDevState *d, Error **errp) {
++    Chardev *chr = NULL;
++    char *uri = NULL;
++
++    d->chr.chr_connected = 0;
++    if (d->chardev_id) {
++        chr = qemu_chr_find(d->chardev_id);
++        if (!chr) {
++            error_setg(errp, "Chardev '%s' not found", d->chardev_id);
++            return 0;
++        }
++        qemu_log(
++            "Using configured chardev `%s` as memory actions socket\n",
++            d->chardev_id
++        );
++    } else {
++        if (d->chardev_host == NULL) d->chardev_host = (char *)"127.0.0.1";
++        uri = g_strdup_printf(
++            "socket,host=%s,port=%d,server=on,nowait",
++            d->chardev_host,
++            d->chardev_port
++        );
++        chr = qemu_chr_new("lab2-testdev-ipc", uri, NULL);
++        g_free(uri);
++        if (!chr) {
++            error_setg(
++                errp,
++                "Failed to create chardev on %s:%d",
++                d->chardev_host,
++                d->chardev_port
++            );
++            return 0;
++        }
++
++        qemu_log(
++            "Start new chardev `lab2-testdev-ipc` at %s:%d\n",
++            d->chardev_host,
++            d->chardev_port
++        );
++    }
++
++    if (!qemu_chr_fe_init(&d->chr.chr, chr, errp)) return 0;
++
++    qemu_chr_fe_set_handlers(
++        &d->chr.chr,
++        lab2_testdev_chr_can_read,
++        lab2_testdev_chr_read,
++        lab2_testdev_chr_event,
++        NULL,
++        d,
++        NULL,
++        true
++    );
++    d->chr.chr_connected = 1;
++    qemu_log("Successfully initialized chardev\n");
++    return 1;
++}
++
++static void lab2_testdev_realize(PCIDevice *pci_dev, Error **errp) {
++    Lab2TestDevState *d = LAB2_TESTDEV(pci_dev);
++
++    if (msi_init(pci_dev, 0, 1, true, false, errp)) return;
++
++    if (!lab2_testdev_realize_chardev(d, errp)) return;
++
++    for (int bar_no = 0; bar_no < BARS_NUM; ++bar_no) {
++        struct membar *bar = d->bars + bar_no;
++        bar->bar_no = bar_no;
++        if (bar->hostmem == NULL) {
++            qemu_log("Skip initialization of lab2_testdev bar%d\n", bar_no);
++            continue;
++        }
++        qemu_log("Initializing lab2_testdev bar%d\n", bar_no);
++
++        bar->mem = host_memory_backend_get_memory(bar->hostmem);
++        host_memory_backend_set_mapped(bar->hostmem, true);
++        pci_register_bar(
++            pci_dev,
++            bar_no,
++            PCI_BASE_ADDRESS_SPACE_MEMORY | PCI_BASE_ADDRESS_MEM_PREFETCH
++                | PCI_BASE_ADDRESS_MEM_TYPE_64,
++            bar->mem
++        );
++    }
++    qemu_log("lab2_testdev realize success\n");
++}
++
++static void lab2_testdev_uninit(PCIDevice *dev) {
++    Lab2TestDevState *d = LAB2_TESTDEV(dev);
++
++    if (d->chr.chr_connected)
++        qemu_chr_fe_write(&d->chr.chr, (const uint8_t *)"EOF\n", 4);
++
++    qemu_chr_fe_deinit(&d->chr.chr, false);
++
++    g_free(d->chardev_host);
++    g_free(d->chardev_id);
++}
++
++static void qdev_lab2_testdev_reset(DeviceState *dev) {}
++
++// clang-format off
++static const Property lab2_testdev_properties[] = {
++    // NOTE: раскоментируйте необходимые настройки, если нужны другие bar регистры
++    DEFINE_PROP_SIZE("bar0-size", Lab2TestDevState, bars[0].size, 4 * 1024),
++    // DEFINE_PROP_SIZE("bar1-size", Lab2TestDevState, bars[1].size, 4 * 1024),
++    DEFINE_PROP_SIZE("bar2-size", Lab2TestDevState, bars[2].size, 4 * 1024),
++    // DEFINE_PROP_SIZE("bar3-size", Lab2TestDevState, bars[3].size, 4 * 1024),
++    // DEFINE_PROP_SIZE("bar4-size", Lab2TestDevState, bars[4].size, 4 * 1024),
++    // DEFINE_PROP_SIZE("bar5-size", Lab2TestDevState, bars[5].size, 4 * 1024),
++    // DEFINE_PROP_SIZE("bar6-size", Lab2TestDevState, bars[6].size, 4 * 1024),
++    DEFINE_PROP_LINK("bar0-obj", Lab2TestDevState, bars[0].hostmem, TYPE_MEMORY_BACKEND, HostMemoryBackend *),
++    // DEFINE_PROP_LINK("bar1-obj", Lab2TestDevState, bars[1].hostmem, TYPE_MEMORY_BACKEND, HostMemoryBackend *),
++    DEFINE_PROP_LINK("bar2-obj", Lab2TestDevState, bars[2].hostmem, TYPE_MEMORY_BACKEND, HostMemoryBackend *),
++    // DEFINE_PROP_LINK("bar3-obj", Lab2TestDevState, bars[3].hostmem, TYPE_MEMORY_BACKEND, HostMemoryBackend *),
++    // DEFINE_PROP_LINK("bar4-obj", Lab2TestDevState, bars[4].hostmem, TYPE_MEMORY_BACKEND, HostMemoryBackend *),
++    // DEFINE_PROP_LINK("bar5-obj", Lab2TestDevState, bars[5].hostmem, TYPE_MEMORY_BACKEND, HostMemoryBackend *),
++    // DEFINE_PROP_LINK("bar6-obj", Lab2TestDevState, bars[6].hostmem, TYPE_MEMORY_BACKEND, HostMemoryBackend *),
++    DEFINE_PROP_STRING("chardev-host", Lab2TestDevState, chardev_host),
++    DEFINE_PROP_UINT16("chardev-port", Lab2TestDevState, chardev_port, 17887),
++    DEFINE_PROP_STRING("chardev-id", Lab2TestDevState, chardev_id),
++};
++// clang-format on
++
++static void lab2_testdev_class_init(ObjectClass *klass, const void *data) {
++    DeviceClass *dc = DEVICE_CLASS(klass);
++    PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
++
++    k->realize = lab2_testdev_realize;
++    k->exit = lab2_testdev_uninit;
++    k->vendor_id = PCI_VENDOR_ID_REDHAT;
++    k->device_id = PCI_DEVICE_ID_REDHAT_TEST;
++    k->revision = 0x00;
++    k->class_id = PCI_CLASS_OTHERS;
++    dc->desc = "PCI Test Device";
++    set_bit(DEVICE_CATEGORY_MISC, dc->categories);
++    device_class_set_legacy_reset(dc, qdev_lab2_testdev_reset);
++    device_class_set_props(dc, lab2_testdev_properties);
++}
++
++static const TypeInfo lab2_testdev_info = {
++    .name = TYPE_LAB2_TESTDEV,
++    .parent = TYPE_PCI_DEVICE,
++    .instance_size = sizeof(Lab2TestDevState),
++    .class_init = lab2_testdev_class_init,
++    .interfaces = (const InterfaceInfo[]){
++        {INTERFACE_CONVENTIONAL_PCI_DEVICE},
++        {},
++    },
++};
++
++static void lab2_testdev_register_types(void) {
++    type_register_static(&lab2_testdev_info);
++}
++
++type_init(lab2_testdev_register_types)
+diff --git a/hw/misc/meson.build b/hw/misc/meson.build
+index b1d8d8e5d2..211fc4b47f 100644
+--- a/hw/misc/meson.build
++++ b/hw/misc/meson.build
+@@ -4,6 +4,7 @@ system_ss.add(when: 'CONFIG_FW_CFG_DMA', if_true: files('vmcoreinfo.c'))
+ system_ss.add(when: 'CONFIG_ISA_DEBUG', if_true: files('debugexit.c'))
+ system_ss.add(when: 'CONFIG_ISA_TESTDEV', if_true: files('pc-testdev.c'))
+ system_ss.add(when: 'CONFIG_PCI_TESTDEV', if_true: files('pci-testdev.c'))
++system_ss.add(when: 'CONFIG_LAB2_TESTDEV', if_true: files('lab2-testdev.c'))
+ system_ss.add(when: 'CONFIG_UNIMP', if_true: files('unimp.c'))
+ system_ss.add(when: 'CONFIG_EMPTY_SLOT', if_true: files('empty_slot.c'))
+ system_ss.add(when: 'CONFIG_LED', if_true: files('led.c'))
